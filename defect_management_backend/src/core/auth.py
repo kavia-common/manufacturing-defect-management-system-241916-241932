@@ -47,35 +47,75 @@ _jwks_cache = _JwksCache()
 
 def _get_jwks_url() -> str:
     settings = load_settings()
-    # Supabase JWKS endpoint:
-    # https://<project>.supabase.co/auth/v1/keys
+    # Supabase JWKS endpoint (default):
+    #   https://<project>.supabase.co/auth/v1/keys
     return settings.supabase_url.rstrip("/") + "/auth/v1/keys"
+
+
+def _get_expected_issuer() -> str:
+    """
+    Compute the expected issuer for Supabase access tokens.
+
+    Supabase commonly uses:
+      - https://<project>.supabase.co/auth/v1
+
+    In some configurations (or older tokens), the `iss` may differ (e.g. auth subdomain).
+    We therefore *prefer* to verify issuer, but we also fall back to a manual check
+    that the issuer ends with '/auth/v1' to avoid breaking valid Supabase tokens.
+    """
+    settings = load_settings()
+    return settings.supabase_url.rstrip("/") + "/auth/v1"
 
 
 async def _verify_supabase_jwt(token: str) -> Dict[str, Any]:
     """
     Verify a Supabase-issued JWT using the project's JWKS.
 
-    We validate signature + standard claims (exp, nbf when present). We also validate issuer.
+    Validation performed:
+    - Signature verification via RS256 + project JWKS
+    - exp/nbf (standard JWT time claims)
+    - issuer: preferred exact match to `${SUPABASE_URL}/auth/v1`, with a tolerant fallback
+
+    Audience:
+    - Not enforced by default (Supabase access tokens may not include a consistent `aud`).
 
     NOTE: If SUPABASE_URL is a placeholder, this will fail because the JWKS endpoint
-    will not resolve. That's expected for step 04.01 until real credentials exist.
+    will not resolve. That's expected until real credentials exist (unless AUTH_DISABLED=true).
     """
     settings = load_settings()
     jwks_url = _get_jwks_url()
+    expected_issuer = _get_expected_issuer()
 
     try:
         jwk_client = _jwks_cache.get_client(jwks_url)
         signing_key = jwk_client.get_signing_key_from_jwt(token).key
-        claims = jwt.decode(
-            token,
-            signing_key,
-            algorithms=["RS256"],
-            audience=None,  # Supabase access tokens may not include aud reliably
-            options={"verify_aud": False},
-            issuer=settings.supabase_url.rstrip("/") + "/auth/v1",
-        )
-        return claims
+
+        # First try strict issuer validation (preferred).
+        try:
+            claims = jwt.decode(
+                token,
+                signing_key,
+                algorithms=["RS256"],
+                audience=None,
+                options={"verify_aud": False},
+                issuer=expected_issuer,
+            )
+            return claims
+        except jwt.InvalidIssuerError:
+            # Fallback: decode without issuer verification, then apply a Supabase-shaped check.
+            # This keeps verification secure (signature/exp validated) but avoids issuer brittleness.
+            claims = jwt.decode(
+                token,
+                signing_key,
+                algorithms=["RS256"],
+                audience=None,
+                options={"verify_aud": False, "verify_iss": False},
+            )
+            iss = str(claims.get("iss") or "")
+            if not iss.endswith("/auth/v1"):
+                raise
+            return claims
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

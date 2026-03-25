@@ -35,5 +35,10 @@ Where real Supabase is required:
 - JWT verification needs a real Supabase project URL (JWKS endpoint must resolve).
 
 Frontend environment reference (in its container):
-- `NEXT_PUBLIC_API_BASE` should point to the backend base URL (e.g. `http://localhost:8000/api/v1`)
-- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_KEY` can be placeholders until auth is enabled.
+- `NEXT_PUBLIC_API_BASE_URL` should point to the backend base URL (e.g. `http://localhost:8000`)
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` should be set for real auth.
+
+Supabase JWT verification defaults (backend):
+- JWKS: `${SUPABASE_URL}/auth/v1/keys`
+- Issuer: `${SUPABASE_URL}/auth/v1`
+- Audience: not enforced (Supabase access tokens may vary); backend disables aud verification by default.
