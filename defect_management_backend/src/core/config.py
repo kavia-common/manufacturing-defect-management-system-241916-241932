@@ -26,20 +26,33 @@ def _parse_db_connection_txt_value(raw: str) -> str:
     return raw
 
 
+def _find_db_connection_txt() -> Optional[Path]:
+    """
+    Locate `defect_management_database/db_connection.txt` by scanning sibling workspaces.
+
+    The workspace naming has an auto-generated suffix, so we cannot rely on a fixed path.
+    We intentionally keep the scan small (workspace root's parent) for safety/perf.
+    """
+    backend_dir = Path(__file__).resolve().parents[3]  # .../defect_management_backend
+    workspaces_parent = backend_dir.parent.parent  # .../code-generation
+
+    # Likely location pattern:
+    #   manufacturing-defect-management-system-*/defect_management_database/db_connection.txt
+    for p in workspaces_parent.glob("manufacturing-defect-management-system-*/defect_management_database/db_connection.txt"):
+        if p.exists():
+            return p
+    return None
+
+
 def _default_db_url() -> Optional[str]:
     """
-    Attempt to read the Postgres URL from the sibling database container's db_connection.txt.
+    Attempt to read the Postgres URL from the database container's db_connection.txt.
+
+    Prefer DATABASE_URL env var in production; this is a dev-friendly convenience.
     """
-    # Repo layout:
-    # manufacturing-defect-management-system-*/defect_management_backend
-    # manufacturing-defect-management-system-*/../manufacturing-defect-management-system-*/defect_management_database/db_connection.txt
-    backend_dir = Path(__file__).resolve().parents[3]  # .../defect_management_backend
-    workspace_dir = backend_dir.parent  # .../manufacturing-defect-management-system-241916-241932
-    # database workspace is a sibling folder at /home/kavia/...-241930; we cannot safely compute it.
-    # Therefore, use an env var first and only fallback to a conventional relative lookup if present.
-    rel_guess = workspace_dir.parent / "manufacturing-defect-management-system-241916-241930" / "defect_management_database" / "db_connection.txt"
-    if rel_guess.exists():
-        return _parse_db_connection_txt_value(rel_guess.read_text(encoding="utf-8"))
+    txt_path = _find_db_connection_txt()
+    if txt_path and txt_path.exists():
+        return _parse_db_connection_txt_value(txt_path.read_text(encoding="utf-8"))
     return None
 
 
@@ -51,6 +64,8 @@ class Settings:
     database_url: str
 
     # Supabase JWT verification
+    # NOTE: For step 04.01 we allow placeholders so non-auth flows can run.
+    # Auth-protected endpoints will still require real Supabase values to function.
     supabase_url: str
     supabase_anon_key: str
 
@@ -62,29 +77,43 @@ class Settings:
     # App
     trust_proxy: bool = False
     environment: str = "development"
+    auth_disabled: bool = False
+
+
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "")
+    if raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_settings() -> Settings:
     """
     Load settings from environment variables.
 
-    Environment variables expected (already present in this container's .env):
-    - SUPABASE_URL
-    - SUPABASE_KEY
-    - ALLOWED_ORIGINS (comma-separated)
-    - ALLOWED_HEADERS (comma-separated)
-    - ALLOWED_METHODS (comma-separated)
-
-    Additionally required for DB connectivity:
+    Required for DB connectivity:
     - DATABASE_URL (recommended), a SQLAlchemy-compatible URL like:
         postgresql+psycopg://user:pass@host:port/db
       If not provided, we try to infer from the database container db_connection.txt.
-    """
-    supabase_url = os.environ.get("SUPABASE_URL", "").strip()
-    supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
-    if not supabase_url or not supabase_key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
 
+    Supabase:
+    - SUPABASE_URL
+    - SUPABASE_KEY
+
+    For step 04.01 (placeholder integration) we do NOT hard-fail if Supabase vars
+    are missing. Instead we populate safe placeholders and allow running endpoints
+    that don't require authentication. Authenticated endpoints will fail until real
+    Supabase values are provided OR AUTH_DISABLED=true is set for local/dev.
+
+    CORS:
+    - ALLOWED_ORIGINS (comma-separated), default "*"
+    - ALLOWED_HEADERS (comma-separated), default "*"
+    - ALLOWED_METHODS (comma-separated), default "*"
+
+    Optional:
+    - AUTH_DISABLED=true to bypass JWT verification/RBAC (DEV ONLY).
+    - TRUST_PROXY=true if behind a reverse proxy.
+    """
     allowed_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
     allowed_headers = [h.strip() for h in os.environ.get("ALLOWED_HEADERS", "*").split(",") if h.strip()]
     allowed_methods = [m.strip() for m in os.environ.get("ALLOWED_METHODS", "*").split(",") if m.strip()]
@@ -100,7 +129,6 @@ def load_settings() -> Settings:
                 "Set DATABASE_URL to e.g. postgresql+psycopg://appuser:...@localhost:5000/myapp"
             )
         # Convert plain postgresql://... into SQLAlchemy psycopg URL.
-        # Keep it simple: if already has +psycopg keep, else insert.
         if inferred.startswith("postgresql+"):
             database_url = inferred
         elif inferred.startswith("postgresql://"):
@@ -108,8 +136,13 @@ def load_settings() -> Settings:
         else:
             database_url = inferred
 
-    trust_proxy = os.environ.get("TRUST_PROXY", "false").strip().lower() in {"1", "true", "yes", "on"}
+    # Supabase placeholders (usable to boot the service / generate docs)
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip() or "https://placeholder.supabase.co"
+    supabase_key = os.environ.get("SUPABASE_KEY", "").strip() or "placeholder-anon-key"
+
+    trust_proxy = _read_bool_env("TRUST_PROXY", default=False)
     environment = os.environ.get("NODE_ENV", "development").strip()
+    auth_disabled = _read_bool_env("AUTH_DISABLED", default=False)
 
     return Settings(
         database_url=database_url,
@@ -120,4 +153,5 @@ def load_settings() -> Settings:
         allowed_methods=allowed_methods,
         trust_proxy=trust_proxy,
         environment=environment,
+        auth_disabled=auth_disabled,
     )

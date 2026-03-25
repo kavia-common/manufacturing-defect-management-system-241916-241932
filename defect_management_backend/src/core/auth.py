@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
-import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -58,6 +57,9 @@ async def _verify_supabase_jwt(token: str) -> Dict[str, Any]:
     Verify a Supabase-issued JWT using the project's JWKS.
 
     We validate signature + standard claims (exp, nbf when present). We also validate issuer.
+
+    NOTE: If SUPABASE_URL is a placeholder, this will fail because the JWKS endpoint
+    will not resolve. That's expected for step 04.01 until real credentials exist.
     """
     settings = load_settings()
     jwks_url = _get_jwks_url()
@@ -77,7 +79,7 @@ async def _verify_supabase_jwt(token: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired token: {e}",
+            detail=f"Invalid or expired token (or Supabase not configured): {e}",
         ) from e
 
 
@@ -117,7 +119,22 @@ async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db=Depends(get_db_session),
 ) -> AuthenticatedUser:
-    """FastAPI dependency: validates Supabase JWT and loads RBAC roles from Postgres."""
+    """
+    FastAPI dependency: validates Supabase JWT and loads RBAC roles from Postgres.
+
+    If AUTH_DISABLED=true, returns a synthetic user suitable for local demos.
+    """
+    settings = load_settings()
+    if settings.auth_disabled:
+        # DEV ONLY: synthetic superuser-like context to make non-auth flows operable.
+        return AuthenticatedUser(
+            supabase_uid="dev-user",
+            email="dev@example.com",
+            db_user_id=None,
+            roles={"operator", "production_supervisor", "quality_engineer"},
+            raw_claims={"sub": "dev-user", "email": "dev@example.com", "auth_disabled": True},
+        )
+
     if creds is None or not creds.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization bearer token")
 
@@ -127,8 +144,6 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing 'sub' claim")
 
     db_user_id, roles, email = _get_roles_for_user(db, supabase_uid=supabase_uid)
-    # If user not provisioned in local DB, treat as authenticated but unprivileged.
-    # Frontend can show "request access" flows.
     ip = request.client.host if request.client else None
     _ = ip  # reserved for future audit meta
 
