@@ -31,16 +31,36 @@ def _find_db_connection_txt() -> Optional[Path]:
     Locate `defect_management_database/db_connection.txt` by scanning sibling workspaces.
 
     The workspace naming has an auto-generated suffix, so we cannot rely on a fixed path.
-    We intentionally keep the scan small (workspace root's parent) for safety/perf.
-    """
-    backend_dir = Path(__file__).resolve().parents[3]  # .../defect_management_backend
-    workspaces_parent = backend_dir.parent.parent  # .../code-generation
 
-    # Likely location pattern:
-    #   manufacturing-defect-management-system-*/defect_management_database/db_connection.txt
-    for p in workspaces_parent.glob("manufacturing-defect-management-system-*/defect_management_database/db_connection.txt"):
+    IMPORTANT: This repository is checked out under:
+        /home/kavia/workspace/code-generation/<workspace-name>/defect_management_backend/...
+
+    A previous implementation used an incorrect `parents[]` index, which caused us to scan
+    `/home/kavia/workspace/*` instead of `/home/kavia/workspace/code-generation/*`, so
+    `db_connection.txt` was never discovered.
+    """
+    # /.../<workspace-name>/defect_management_backend/src/core/config.py
+    # parents[0]=core, [1]=src, [2]=defect_management_backend
+    backend_dir = Path(__file__).resolve().parents[2]
+    workspace_dir = backend_dir.parent  # .../<workspace-name>
+    codegen_dir = workspace_dir.parent  # .../code-generation
+
+    # Fast paths first (avoid globbing if possible)
+    candidates = [
+        # Typical sibling workspace layout:
+        codegen_dir / "manufacturing-defect-management-system-241916-241930" / "defect_management_database" / "db_connection.txt",
+        # Generic pattern inside the *same* workspace dir (if someone co-locates db container)
+        workspace_dir / "defect_management_database" / "db_connection.txt",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+
+    # Bounded scan under code-generation for any matching workspace.
+    for p in codegen_dir.glob("manufacturing-defect-management-system-*/defect_management_database/db_connection.txt"):
         if p.exists():
             return p
+
     return None
 
 
