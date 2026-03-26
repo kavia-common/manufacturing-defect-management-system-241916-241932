@@ -26,7 +26,9 @@ def _init() -> None:
         pool_pre_ping=True,
         future=True,
     )
-    _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
+    _SessionLocal = sessionmaker(
+        bind=_engine, autoflush=False, autocommit=False, future=True
+    )
 
 
 # PUBLIC_INTERFACE
@@ -69,12 +71,16 @@ class DbConflictError(Exception):
     """Raised when a uniqueness/constraint conflict occurs."""
 
 
-def fetch_one(db: Session, sql: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def fetch_one(
+    db: Session, sql: str, params: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
     row = db.execute(text(sql), params or {}).mappings().first()
     return dict(row) if row else None
 
 
-def fetch_all(db: Session, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+def fetch_all(
+    db: Session, sql: str, params: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
     rows = db.execute(text(sql), params or {}).mappings().all()
     return [dict(r) for r in rows]
 

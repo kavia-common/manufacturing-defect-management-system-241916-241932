@@ -9,16 +9,33 @@ from fastapi.responses import PlainTextResponse
 from src.api.routers import router as api_router
 from src.core.config import load_settings
 
-
 openapi_tags = [
-    {"name": "health", "description": "Health, readiness, and environment diagnostics."},
-    {"name": "configs", "description": "Configuration master data (defect types, lines, shifts, parts, severity rules)."},
-    {"name": "defects", "description": "Defect logging, listing, updating, and history."},
+    {
+        "name": "health",
+        "description": "Health, readiness, and environment diagnostics.",
+    },
+    {
+        "name": "configs",
+        "description": "Configuration master data (defect types, lines, shifts, parts, severity rules).",
+    },
+    {
+        "name": "defects",
+        "description": "Defect logging, listing, updating, and history.",
+    },
     {"name": "rca", "description": "Root Cause Analysis (RCA) capture and completion."},
-    {"name": "actions", "description": "Corrective actions workflow and status history."},
-    {"name": "dashboards", "description": "Dashboard data (Pareto, trends, due actions) backed by DB views."},
+    {
+        "name": "actions",
+        "description": "Corrective actions workflow and status history.",
+    },
+    {
+        "name": "dashboards",
+        "description": "Dashboard data (Pareto, trends, due actions) backed by DB views.",
+    },
     {"name": "audit", "description": "Audit log read APIs (immutable audit trail)."},
-    {"name": "uploads", "description": "Attachment metadata. Binary upload is performed via Supabase Storage client-side."},
+    {
+        "name": "uploads",
+        "description": "Attachment metadata. Binary upload is performed via Supabase Storage client-side.",
+    },
     {"name": "export", "description": "Exports (PDF)."},
 ]
 
@@ -79,7 +96,10 @@ def create_app() -> FastAPI:
         Returns key integration settings (redacted) so containers can be wired up
         using placeholders and still verify configuration flow.
         """
-        supabase_is_placeholder = settings.supabase_anon_key.startswith("placeholder") or "placeholder" in settings.supabase_url
+        supabase_is_placeholder = (
+            settings.supabase_anon_key.startswith("placeholder")
+            or "placeholder" in settings.supabase_url
+        )
         return {
             "status": "ready",
             "database_url_set": bool(settings.database_url),

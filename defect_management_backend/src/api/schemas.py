@@ -82,7 +82,9 @@ class RcaUpsert(BaseModel):
     problem_statement: Optional[str] = None
     root_cause: Optional[str] = None
     containment_action: Optional[str] = None
-    why_analysis: List[str] = Field(default_factory=list, description="List of '5 whys' entries")
+    why_analysis: List[str] = Field(
+        default_factory=list, description="List of '5 whys' entries"
+    )
     contributing_factors: Optional[str] = None
     completed: bool = Field(False, description="If true, marks RCA completed")
 
@@ -115,7 +117,9 @@ class ActionUpdate(BaseModel):
     owner_user_id: Optional[UUID] = None
     due_date: Optional[date] = None
     status: Optional[ActionStatus] = None
-    verified: Optional[bool] = Field(None, description="If true sets verified_at/by; if false clears verification")
+    verified: Optional[bool] = Field(
+        None, description="If true sets verified_at/by; if false clears verification"
+    )
 
 
 class ActionOut(BaseModel):

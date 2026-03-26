@@ -35,7 +35,11 @@ class _JwksCache:
     def get_client(self, jwks_url: str) -> PyJWKClient:
         # refresh every 10 minutes
         now = time.time()
-        if self._jwks_client is None or self._jwks_url != jwks_url or now >= self._expires_at:
+        if (
+            self._jwks_client is None
+            or self._jwks_url != jwks_url
+            or now >= self._expires_at
+        ):
             self._jwks_url = jwks_url
             self._jwks_client = PyJWKClient(jwks_url)
             self._expires_at = now + 600
@@ -82,7 +86,6 @@ async def _verify_supabase_jwt(token: str) -> Dict[str, Any]:
     NOTE: If SUPABASE_URL is a placeholder, this will fail because the JWKS endpoint
     will not resolve. That's expected until real credentials exist (unless AUTH_DISABLED=true).
     """
-    settings = load_settings()
     jwks_url = _get_jwks_url()
     expected_issuer = _get_expected_issuer()
 
@@ -123,7 +126,9 @@ async def _verify_supabase_jwt(token: str) -> Dict[str, Any]:
         ) from e
 
 
-def _get_roles_for_user(db, supabase_uid: str) -> tuple[Optional[str], Set[str], Optional[str]]:
+def _get_roles_for_user(
+    db, supabase_uid: str
+) -> tuple[Optional[str], Set[str], Optional[str]]:
     """
     Return (db_user_id, roles, email) by joining users->user_roles->roles.
     """
@@ -172,16 +177,25 @@ async def get_current_user(
             email="dev@example.com",
             db_user_id=None,
             roles={"operator", "production_supervisor", "quality_engineer"},
-            raw_claims={"sub": "dev-user", "email": "dev@example.com", "auth_disabled": True},
+            raw_claims={
+                "sub": "dev-user",
+                "email": "dev@example.com",
+                "auth_disabled": True,
+            },
         )
 
     if creds is None or not creds.credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization bearer token",
+        )
 
     claims = await _verify_supabase_jwt(creds.credentials)
     supabase_uid = claims.get("sub")
     if not supabase_uid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing 'sub' claim")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing 'sub' claim"
+        )
 
     db_user_id, roles, email = _get_roles_for_user(db, supabase_uid=supabase_uid)
     ip = request.client.host if request.client else None
@@ -200,7 +214,9 @@ async def get_current_user(
 def require_roles(required: Set[str]):
     """Dependency factory enforcing RBAC roles."""
 
-    async def _dep(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+    async def _dep(
+        user: AuthenticatedUser = Depends(get_current_user),
+    ) -> AuthenticatedUser:
         if not user.roles.intersection(required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -212,6 +228,8 @@ def require_roles(required: Set[str]):
 
 
 # PUBLIC_INTERFACE
-def require_authenticated(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+def require_authenticated(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
     """Dependency enforcing authentication only (no RBAC role required)."""
     return user

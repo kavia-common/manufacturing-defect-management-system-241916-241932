@@ -48,7 +48,10 @@ def _find_db_connection_txt() -> Optional[Path]:
     # Fast paths first (avoid globbing if possible)
     candidates = [
         # Typical sibling workspace layout:
-        codegen_dir / "manufacturing-defect-management-system-241916-241930" / "defect_management_database" / "db_connection.txt",
+        codegen_dir
+        / "manufacturing-defect-management-system-241916-241930"
+        / "defect_management_database"
+        / "db_connection.txt",
         # Generic pattern inside the *same* workspace dir (if someone co-locates db container)
         workspace_dir / "defect_management_database" / "db_connection.txt",
     ]
@@ -57,7 +60,9 @@ def _find_db_connection_txt() -> Optional[Path]:
             return c
 
     # Bounded scan under code-generation for any matching workspace.
-    for p in codegen_dir.glob("manufacturing-defect-management-system-*/defect_management_database/db_connection.txt"):
+    for p in codegen_dir.glob(
+        "manufacturing-defect-management-system-*/defect_management_database/db_connection.txt"
+    ):
         if p.exists():
             return p
 
@@ -134,9 +139,21 @@ def load_settings() -> Settings:
     - AUTH_DISABLED=true to bypass JWT verification/RBAC (DEV ONLY).
     - TRUST_PROXY=true if behind a reverse proxy.
     """
-    allowed_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
-    allowed_headers = [h.strip() for h in os.environ.get("ALLOWED_HEADERS", "*").split(",") if h.strip()]
-    allowed_methods = [m.strip() for m in os.environ.get("ALLOWED_METHODS", "*").split(",") if m.strip()]
+    allowed_origins = [
+        o.strip()
+        for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+        if o.strip()
+    ]
+    allowed_headers = [
+        h.strip()
+        for h in os.environ.get("ALLOWED_HEADERS", "*").split(",")
+        if h.strip()
+    ]
+    allowed_methods = [
+        m.strip()
+        for m in os.environ.get("ALLOWED_METHODS", "*").split(",")
+        if m.strip()
+    ]
 
     db_url_env = os.environ.get("DATABASE_URL", "").strip()
     if db_url_env:
@@ -157,7 +174,9 @@ def load_settings() -> Settings:
             database_url = inferred
 
     # Supabase placeholders (usable to boot the service / generate docs)
-    supabase_url = os.environ.get("SUPABASE_URL", "").strip() or "https://placeholder.supabase.co"
+    supabase_url = (
+        os.environ.get("SUPABASE_URL", "").strip() or "https://placeholder.supabase.co"
+    )
     supabase_key = os.environ.get("SUPABASE_KEY", "").strip() or "placeholder-anon-key"
 
     trust_proxy = _read_bool_env("TRUST_PROXY", default=False)
