@@ -23,6 +23,8 @@ from src.api.schemas import (
     PageMeta,
     RcaOut,
     RcaUpsert,
+    UserListItem,
+    UserMeOut,
 )
 from src.core.auth import AuthenticatedUser, require_authenticated, require_roles
 from src.core.db import DbConflictError, fetch_all, fetch_one, get_db_session
@@ -35,6 +37,67 @@ def _paged(
 ) -> PagedResponse:
     return PagedResponse(
         meta=PageMeta(limit=limit, offset=offset, total=meta_total), items=items
+    )
+
+
+@router.get(
+    "/auth/me",
+    response_model=UserMeOut,
+    tags=["health"],
+    summary="Get current authenticated user profile",
+    description=(
+        "Returns the authenticated user's Supabase UID, email, internal DB user id (if mapped), "
+        "and resolved RBAC roles. Frontend uses this to drive navigation and permissions."
+    ),
+)
+def auth_me(user: AuthenticatedUser = Depends(require_authenticated)) -> UserMeOut:
+    # PUBLIC_INTERFACE
+    """Return the current authenticated user context (for frontend session bootstrap)."""
+    return UserMeOut(
+        supabase_uid=user.supabase_uid,
+        email=user.email,
+        db_user_id=UUID(user.db_user_id) if user.db_user_id else None,
+        roles=sorted(user.roles),
+    )
+
+
+@router.get(
+    "/users",
+    response_model=List[UserListItem],
+    tags=["configs"],
+    summary="List active users (for pickers)",
+    description=(
+        "Lists active users from the RBAC tables. Typically used for selecting an action owner. "
+        "Requires supervisor or quality role."
+    ),
+)
+def list_users(
+    is_active: Optional[bool] = Query(
+        True, description="If true, returns only active users"
+    ),
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db_session),
+    _: AuthenticatedUser = Depends(
+        require_roles({"production_supervisor", "quality_engineer"})
+    ),
+) -> List[Dict[str, Any]]:
+    # PUBLIC_INTERFACE
+    """List users for assignment/pickers (minimal fields)."""
+    where_sql = ""
+    params: Dict[str, Any] = {"limit": limit}
+    if is_active is not None:
+        where_sql = " where is_active = :is_active"
+        params["is_active"] = is_active
+    return fetch_all(
+        db,
+        f"""
+        select id, email, display_name, is_active
+        from users
+        {where_sql}
+        order by coalesce(display_name, email) asc nulls last
+        limit :limit
+        """,
+        params,
     )
 
 
@@ -360,6 +423,9 @@ def list_actions(
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None, alias="status"),
     due_before: Optional[date] = None,
+    defect_id: Optional[UUID] = Query(
+        None, description="Optional filter: only actions for this defect"
+    ),
     db: Session = Depends(get_db_session),
     _: AuthenticatedUser = Depends(require_authenticated),
 ):
@@ -372,6 +438,10 @@ def list_actions(
     if due_before:
         where.append("a.due_date <= :due_before")
         params["due_before"] = due_before
+    if defect_id:
+        where.append("a.defect_id = :defect_id")
+        params["defect_id"] = str(defect_id)
+
     where_sql = (" where " + " and ".join(where)) if where else ""
 
     total_row = fetch_one(
@@ -391,6 +461,44 @@ def list_actions(
         params,
     )
     return _paged(total, limit, offset, items)
+
+
+@router.get("/actions/{action_id}", response_model=ActionOut, tags=["actions"])
+def get_action(
+    action_id: UUID,
+    db: Session = Depends(get_db_session),
+    _: AuthenticatedUser = Depends(require_authenticated),
+):
+    # PUBLIC_INTERFACE
+    """Get a single corrective action by id."""
+    row = fetch_one(
+        db, "select * from corrective_actions where id = :id", {"id": str(action_id)}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Action not found")
+    return row  # type: ignore[return-value]
+
+
+@router.get(
+    "/defects/{defect_id}/actions",
+    response_model=List[ActionOut],
+    tags=["actions"],
+)
+def list_actions_for_defect(
+    defect_id: UUID,
+    db: Session = Depends(get_db_session),
+    _: AuthenticatedUser = Depends(require_authenticated),
+):
+    # PUBLIC_INTERFACE
+    """List all corrective actions for a defect (non-paginated convenience endpoint)."""
+    defect = fetch_one(db, "select id from defects where id = :id", {"id": str(defect_id)})
+    if not defect:
+        raise HTTPException(status_code=404, detail="Defect not found")
+    return fetch_all(
+        db,
+        "select * from corrective_actions where defect_id = :id order by created_at asc",
+        {"id": str(defect_id)},
+    )
 
 
 @router.patch("/actions/{action_id}", response_model=ActionOut, tags=["actions"])
@@ -516,6 +624,51 @@ def list_attachments(
         "select * from defect_attachments where defect_id = :id order by uploaded_at desc",
         {"id": str(defect_id)},
     )
+
+
+@router.get(
+    "/dashboard/summary",
+    tags=["dashboards"],
+    summary="Dashboard KPI summary",
+    description="Single-call summary KPIs (counts by workflow/action status) for quick dashboard bootstrap.",
+)
+def dashboard_summary(
+    db: Session = Depends(get_db_session),
+    _: AuthenticatedUser = Depends(require_authenticated),
+) -> Dict[str, Any]:
+    # PUBLIC_INTERFACE
+    """Return basic KPI counts used by the dashboard landing page."""
+    defects_by_status = fetch_all(
+        db,
+        """
+        select status, count(*)::int as count
+        from defects
+        group by status
+        order by status asc
+        """,
+    )
+    actions_by_status = fetch_all(
+        db,
+        """
+        select status, count(*)::int as count
+        from corrective_actions
+        group by status
+        order by status asc
+        """,
+    )
+    overdue_actions = fetch_one(
+        db,
+        """
+        select count(*)::int as c
+        from vw_actions_due
+        where days_overdue is not null and days_overdue > 0
+        """,
+    )
+    return {
+        "defects_by_status": defects_by_status,
+        "actions_by_status": actions_by_status,
+        "overdue_actions": int(overdue_actions["c"]) if overdue_actions else 0,
+    }
 
 
 @router.get(

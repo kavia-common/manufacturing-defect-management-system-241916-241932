@@ -201,3 +201,25 @@ class DueActionItem(BaseModel):
     due_date: Optional[date]
     status: str
     days_overdue: Optional[int]
+
+
+class UserMeOut(BaseModel):
+    """Authenticated user profile returned to the frontend for session context."""
+
+    supabase_uid: str = Field(..., description="Supabase user id (`sub` claim)")
+    email: Optional[str] = Field(None, description="User email (from DB or token)")
+    db_user_id: Optional[UUID] = Field(
+        None, description="Internal DB user id if mapped in `users` table"
+    )
+    roles: List[str] = Field(default_factory=list, description="Resolved RBAC roles")
+
+
+class UserListItem(BaseModel):
+    """Lightweight user record for pickers (e.g., action owner selection)."""
+
+    id: UUID
+    email: Optional[str] = None
+    display_name: Optional[str] = Field(
+        None, description="Optional friendly name if present in DB"
+    )
+    is_active: bool = True
